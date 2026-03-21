@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PropMap — 금리</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+:root{
+  --navy:#1b3a6b;--navy2:#2a52a0;--gold:#c78a00;
+  --red:#e03e3e;--green:#16a34a;
+  --text:#1a2332;--muted:#6b7a99;--dim:#9aa5bc;
+  --surface:#f4f7fb;--border:#dce4f0;--white:#fff;
+}
+*{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:'Noto Sans KR',sans-serif;background:var(--surface);color:var(--text);min-height:100vh;}
+header{background:var(--navy);height:58px;display:flex;align-items:center;padding:0 24px;gap:16px;box-shadow:0 2px 12px rgba(0,0,0,.2);}
+.back-btn{padding:6px 14px;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.2);border-radius:8px;color:#fff;font-size:12px;font-family:'Noto Sans KR',sans-serif;cursor:pointer;text-decoration:none;}
+.back-btn:hover{background:rgba(255,255,255,.22);}
+.header-title{font-size:15px;font-weight:700;color:rgba(255,255,255,.8);}
+.update-info{margin-left:auto;font-size:11px;color:rgba(255,255,255,.5);}
+main{max-width:900px;margin:0 auto;padding:28px 24px;}
+.section-title{font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.6px;margin-bottom:14px;display:flex;align-items:center;gap:8px;}
+.section-title::after{content:'';flex:1;height:1px;background:var(--border);}
+.card-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:32px;}
+.rate-card{background:var(--white);border:1px solid var(--border);border-radius:16px;padding:24px;text-align:center;box-shadow:0 2px 12px rgba(27,58,107,.06);}
+.rate-card.highlight{border:2px solid var(--navy2);}
+.rc-label{font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:12px;}
+.rc-val{font-size:36px;font-weight:800;color:var(--navy);line-height:1;margin-bottom:8px;}
+.rc-chg{font-size:13px;font-weight:600;}
+.rc-up{color:var(--red);}
+.rc-dn{color:var(--green);}
+.rc-flat{color:var(--dim);}
+.rc-date{font-size:11px;color:var(--dim);margin-top:8px;}
+.chart-card{background:var(--white);border:1px solid var(--border);border-radius:16px;padding:24px;box-shadow:0 2px 12px rgba(27,58,107,.06);}
+.chart-title{font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:16px;}
+.loading{text-align:center;padding:80px;color:var(--muted);font-size:14px;}
+.spinner{width:36px;height:36px;border:3px solid var(--border);border-top-color:var(--navy2);border-radius:50%;animation:spin .8s linear infinite;margin:0 auto 16px;}
+@keyframes spin{to{transform:rotate(360deg)}}
+.error-box{background:#fff5f5;border:1px solid #fecaca;border-radius:12px;padding:24px;text-align:center;color:#dc2626;font-size:13px;margin-top:20px;}
+</style>
+</head>
+<body>
+
+<header>
+  <a href="index.html" class="back-btn">← PropMap</a>
+  <div class="header-title">📊 금리 현황</div>
+  <div class="update-info" id="update-info"></div>
+</header>
+
+<main>
+  <div id="loading" class="loading">
+    <div class="spinner"></div>
+    금리 데이터를 불러오는 중...
+  </div>
+  <div id="content" style="display:none">
+    <div class="section-title">현재 금리</div>
+    <div class="card-grid">
+      <div class="rate-card highlight">
+        <div class="rc-label">기준금리</div>
+        <div class="rc-val" id="v-base">—</div>
+        <div class="rc-chg" id="c-base"></div>
+        <div class="rc-date" id="d-base"></div>
+      </div>
+      <div class="rate-card">
+        <div class="rc-label">국고채 3년</div>
+        <div class="rc-val" id="v-tb3">—</div>
+        <div class="rc-chg" id="c-tb3"></div>
+        <div class="rc-date" id="d-tb3"></div>
+      </div>
+      <div class="rate-card">
+        <div class="rc-label">국고채 10년</div>
+        <div class="rc-val" id="v-tb10">—</div>
+        <div class="rc-chg" id="c-tb10"></div>
+        <div class="rc-date" id="d-tb10"></div>
+      </div>
+    </div>
+    <div class="section-title">최근 3년 추이</div>
+    <div class="chart-card">
+      <div class="chart-title">기준금리 / 국고채 3년 / 국고채 10년</div>
+      <canvas id="chart" height="100"></canvas>
+    </div>
+  </div>
+  <div id="error-area"></div>
+</main>
+
+<script>
+const ECOS_KEY = 'WNKX92YP70C3H7HKTL6O';
+
+// 날짜 범위 계산
+function getRange(years, monthly){
+  const now = new Date();
+  const ed = new Date(now);
+  const sd = new Date(now);
+  sd.setFullYear(sd.getFullYear() - years);
+  if(monthly){
+    const fmt = d => `${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}`;
+    return {sd:fmt(sd), ed:fmt(ed)};
+  }
+  const fmt = d => `${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}`;
+  return {sd:fmt(sd), ed:fmt(ed)};
+}
+
+// ECOS API — Anthropic Claude API를 통해 호출 (CORS 우회)
+async function fetchEcos(statCode, itemCode, freq, years){
+  const monthly = freq==='M';
+  const {sd, ed} = getRange(years, monthly);
+  const cnt = monthly ? 40 : 800;
+  const apiUrl = `https://ecos.bok.or.kr/api/StatisticSearch/${ECOS_KEY}/json/kr/1/${cnt}/${statCode}/${freq}/${sd}/${ed}/${itemCode}`;
+
+  // 여러 프록시 순차 시도
+  const proxies = [
+    url => `https://corsproxy.io/?${encodeURIComponent(url)}`,
+    url => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`,
+    url => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
+  ];
+
+  for(const makeProxy of proxies){
+    try{
+      const res = await fetch(makeProxy(apiUrl), {signal: AbortSignal.timeout(8000)});
+      if(!res.ok) continue;
+      const text = await res.text();
+      const data = JSON.parse(text);
+      const rows = data?.StatisticSearch?.row;
+      if(rows && rows.length > 0) return rows;
+    }catch(e){ continue; }
+  }
+  throw new Error('모든 프록시 실패');
+}
+
+function fmtTime(t, monthly){
+  if(!t) return '';
+  if(monthly) return `${t.slice(0,4)}.${t.slice(4,6)}`;
+  return `${t.slice(0,4)}.${t.slice(4,6)}.${t.slice(6,8)}`;
+}
+
+function setCard(id, rows, monthly=false){
+  const last = rows[rows.length-1];
+  const prev = rows[rows.length-2];
+  if(!last) return;
+  const v = parseFloat(last.DATA_VALUE);
+  const p = prev ? parseFloat(prev.DATA_VALUE) : NaN;
+  document.getElementById(`v-${id}`).textContent = isNaN(v)?'—':v.toFixed(2)+'%';
+  document.getElementById(`d-${id}`).textContent = fmtTime(last.TIME, monthly)+' 기준';
+  const el = document.getElementById(`c-${id}`);
+  if(!isNaN(v)&&!isNaN(p)){
+    const diff = (v-p).toFixed(2);
+    if(diff>0){el.textContent=`▲ +${diff}%p`;el.className='rc-chg rc-up';}
+    else if(diff<0){el.textContent=`▼ ${diff}%p`;el.className='rc-chg rc-dn';}
+    else{el.textContent='─ 변동없음';el.className='rc-chg rc-flat';}
+  }
+}
+
+async function loadRates(){
+  try{
+    const [base, tb3, tb10] = await Promise.all([
+      fetchEcos('722Y001','0101000','M', 3),
+      fetchEcos('817Y002','010200000','D', 3),
+      fetchEcos('817Y002','010220000','D', 3),
+    ]);
+
+    setCard('base', base, true);
+    setCard('tb3',  tb3);
+    setCard('tb10', tb10);
+
+    document.getElementById('update-info').textContent =
+      '기준: '+fmtTime(tb3[tb3.length-1]?.TIME);
+
+    // 차트 — 15일 간격 샘플링
+    const step = Math.max(1, Math.floor(tb3.length/80));
+    const s3   = tb3.filter((_,i)=>i%step===0||i===tb3.length-1);
+    const s10  = tb10.filter((_,i)=>i%step===0||i===tb10.length-1);
+    const labels = s3.map(r=>`${r.TIME.slice(4,6)}/${r.TIME.slice(6,8)}`);
+
+    // 기준금리는 월별이라 날짜 맞춰 매핑
+    const baseMap = {};
+    base.forEach(r=>{ baseMap[r.TIME] = parseFloat(r.DATA_VALUE); });
+    const baseData = s3.map(r=>{
+      const ym = r.TIME.slice(0,6);
+      return baseMap[ym] ?? null;
+    });
+
+    const ctx = document.getElementById('chart').getContext('2d');
+    new Chart(ctx,{
+      type:'line',
+      data:{labels, datasets:[
+        {label:'기준금리', data:baseData, borderColor:'#1b3a6b', backgroundColor:'rgba(27,58,107,.08)',
+         borderWidth:2.5, pointRadius:0, tension:.1, stepped:true},
+        {label:'국고채 3년', data:s3.map(r=>parseFloat(r.DATA_VALUE)), borderColor:'#2a52a0',
+         backgroundColor:'rgba(42,82,160,.06)', borderWidth:2, pointRadius:0, tension:.3},
+        {label:'국고채 10년', data:s10.map(r=>parseFloat(r.DATA_VALUE)), borderColor:'#c78a00',
+         backgroundColor:'rgba(199,138,0,.06)', borderWidth:2, pointRadius:0, tension:.3},
+      ]},
+      options:{
+        responsive:true,
+        plugins:{
+          legend:{position:'top',labels:{font:{size:11},boxWidth:12}},
+          tooltip:{mode:'index',intersect:false,
+            callbacks:{label:c=>c.parsed.y!=null?`${c.dataset.label}: ${c.parsed.y.toFixed(2)}%`:null}}
+        },
+        scales:{
+          x:{ticks:{maxTicksLimit:18,font:{size:10}},grid:{display:false}},
+          y:{ticks:{font:{size:10},callback:v=>v.toFixed(2)+'%'},grid:{color:'rgba(0,0,0,.05)'}},
+        },
+      }
+    });
+
+    document.getElementById('loading').style.display='none';
+    document.getElementById('content').style.display='block';
+
+  }catch(e){
+    console.error(e);
+    document.getElementById('loading').style.display='none';
+    document.getElementById('error-area').innerHTML=
+      `<div class="error-box">금리 데이터를 불러오지 못했습니다.<br><small style="color:#9ca3af;margin-top:4px;display:block">${e.message}</small></div>`;
+  }
+}
+
+loadRates();
+</script>
+</body>
+</html>
